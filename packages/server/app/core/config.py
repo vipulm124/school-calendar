@@ -19,6 +19,18 @@ class Config(BaseSettings):
     ENV: str = "development"
     ORIGIN: str = "http://localhost:3000"
 
+    # Azure AI Foundry / Azure OpenAI (vision-capable chat model)
+    # Prefer values from .env — do not hardcode secrets here.
+    # Endpoint examples:
+    #   https://<resource>.services.ai.azure.com
+    #   https://<resource>.services.ai.azure.com/openai/v1
+    #   https://<resource>.openai.azure.com
+    AZURE_FOUNDRY_ENDPOINT: str = ""
+    AZURE_FOUNDRY_API_KEY: str = ""
+    AZURE_FOUNDRY_DEPLOYMENT: str = "gpt-4o-mini"
+    # For OpenAI v1 routes use "v1" (or leave blank). Date-style versions are legacy.
+    AZURE_FOUNDRY_API_VERSION: str = "v1"
+
     class Config:
         """
         Load env from the repository .env file and ignore extra env variables.
