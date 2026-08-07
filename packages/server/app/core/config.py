@@ -4,8 +4,28 @@ This module handles loading of environment variables for the application.
 """
 
 from pathlib import Path
+from typing import Optional
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _find_env_file() -> Optional[str]:
+    """
+    Locate a .env file without assuming a fixed repo depth.
+
+    Local layout: packages/server/app/core/config.py → repo root .env
+    Docker layout: /app/core/config.py → often no .env; OS env vars are used instead
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / ".env"
+        if candidate.is_file():
+            return str(candidate)
+
+    cwd_candidate = Path.cwd() / ".env"
+    if cwd_candidate.is_file():
+        return str(cwd_candidate)
+    return None
 
 
 class Config(BaseSettings):
@@ -31,14 +51,11 @@ class Config(BaseSettings):
     # For OpenAI v1 routes use "v1" (or leave blank). Date-style versions are legacy.
     AZURE_FOUNDRY_API_VERSION: str = "v1"
 
-    class Config:
-        """
-        Load env from the repository .env file and ignore extra env variables.
-        """
-
-        env_file = str(Path(__file__).resolve().parents[4] / ".env")
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=_find_env_file(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 config = Config()
