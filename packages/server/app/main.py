@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.v1 import student_class_router, holiday_type_router, holiday_router, planner_router
+from api.v1 import student_class_router, holiday_type_router, holiday_router, planner_router, telegram_router
 
 
 app = FastAPI(
@@ -26,10 +26,11 @@ app = FastAPI(
 )
 
 
-app.include_router(student_class_router, prefix="/student-classes")
-app.include_router(holiday_type_router, prefix="/holiday-types")
-app.include_router(holiday_router, prefix="/holidays")
-app.include_router(planner_router, prefix="/planner")
+app.include_router(student_class_router)
+app.include_router(holiday_type_router)
+app.include_router(holiday_router)
+app.include_router(planner_router)
+app.include_router(telegram_router)
 
 
 app.add_middleware(
