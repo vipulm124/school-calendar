@@ -12,3 +12,4 @@ wheels/
 .env
 DS_Store
 school_calendar.db
+*.sh
