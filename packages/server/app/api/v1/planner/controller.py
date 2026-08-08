@@ -18,6 +18,17 @@ ALLOWED_CONTENT_TYPES = {
     "application/octet-stream",
 }
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+IMAGE_FILENAME_SUFFIXES = (
+    ".heic",
+    ".heif",
+    ".heics",
+    ".heifs",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+)
 
 
 class PlannerController:
@@ -29,12 +40,28 @@ class PlannerController:
     async def extract_from_upload(self, *, image: UploadFile) -> dict:
         content_type = (image.content_type or "").lower()
         filename = image.filename or ""
+        image_bytes = await image.read()
+        return await self.extract_from_bytes(
+            image_bytes=image_bytes,
+            content_type=content_type,
+            filename=filename,
+        )
+
+    async def extract_from_bytes(
+        self,
+        *,
+        image_bytes: bytes,
+        content_type: str,
+        filename: str = "",
+    ) -> dict:
+        content_type = (content_type or "").lower()
+        filename = filename or ""
 
         if content_type not in ALLOWED_CONTENT_TYPES:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Unsupported image type '{image.content_type}'. "
+                    f"Unsupported image type '{content_type}'. "
                     "Use JPEG, PNG, WEBP, GIF, or HEIC/HEIF."
                 ),
             )
@@ -42,15 +69,12 @@ class PlannerController:
         # Reject bare octet-stream unless the filename looks like an image.
         if content_type == "application/octet-stream":
             lower_name = filename.lower()
-            if not lower_name.endswith(
-                (".heic", ".heif", ".heics", ".heifs", ".jpg", ".jpeg", ".png", ".webp", ".gif")
-            ):
+            if not lower_name.endswith(IMAGE_FILENAME_SUFFIXES):
                 raise HTTPException(
                     status_code=400,
                     detail="Unsupported binary upload. Use an image file (JPEG/PNG/HEIC).",
                 )
 
-        image_bytes = await image.read()
         if not image_bytes:
             raise HTTPException(status_code=400, detail="Uploaded image is empty.")
         if len(image_bytes) > MAX_UPLOAD_BYTES:

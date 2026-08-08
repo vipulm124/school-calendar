@@ -51,6 +51,9 @@ class Config(BaseSettings):
     # For OpenAI v1 routes use "v1" (or leave blank). Date-style versions are legacy.
     AZURE_FOUNDRY_API_VERSION: str = "v1"
 
+    # Telegram bot
+    TELEGRAM_BOT_TOKEN: str = ""
+
     model_config = SettingsConfigDict(
         env_file=_find_env_file(),
         env_file_encoding="utf-8",
