@@ -3,7 +3,7 @@ from .base import BaseCrud
 from models import StudentClass
 from schemas import StudentClassCreateRequest, StudentClassUpdateRequest
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 from fastapi import HTTPException
 
 class StudentClassCrud(BaseCrud[StudentClass, StudentClassCreateRequest, StudentClassUpdateRequest]):
@@ -21,9 +21,11 @@ class StudentClassCrud(BaseCrud[StudentClass, StudentClassCreateRequest, Student
         Returns:
             StudentClass | None: The retrieved student class, or None if not found.
         """
+        class_name_norm = str(class_name).strip().upper()
+        section_name_norm = str(section_name).strip().upper()
         query = select(self.model).where(
-            self.model.class_name == class_name,
-            self.model.section_name == section_name,
+            func.upper(self.model.class_name) == class_name_norm,
+            func.upper(self.model.section_name) == section_name_norm,
             self.model.is_deleted.is_(False),
         )
         result = await session.execute(query)
@@ -38,8 +40,9 @@ class StudentClassCrud(BaseCrud[StudentClass, StudentClassCreateRequest, Student
         Returns:
             StudentClass | None: The retrieved student class, or None if not found.
         """
+        class_name_norm = str(class_name).strip().upper()
         query = select(self.model).where(
-            self.model.class_name == class_name,
+            func.upper(self.model.class_name) == class_name_norm,
             self.model.is_deleted.is_(False),
         )
         result = await session.execute(query)
@@ -55,6 +58,10 @@ class StudentClassCrud(BaseCrud[StudentClass, StudentClassCreateRequest, Student
         Returns:
             StudentClass: The created student class.
         """
+        # Schema validators already uppercase; keep defense-in-depth for direct callers.
+        create_obj.class_name = str(create_obj.class_name).strip().upper()
+        create_obj.section_name = str(create_obj.section_name).strip().upper()
+
         existing_class = await self.get_by_class_name(session=session, class_name=create_obj.class_name)
         if existing_class:
             raise HTTPException(status_code=400, detail=f"Student class with class name '{create_obj.class_name}' already exists.")
