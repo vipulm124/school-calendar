@@ -36,6 +36,33 @@ def test_parse_model_content_extracts_holidays_and_ptc():
     assert by_name["GOOD FRIDAY"].category == CellCategory.HOLIDAYS
 
 
+def test_parse_model_content_numbers_repeated_multi_day_leaves():
+    content = """
+    {
+      "planner_title": null,
+      "events": [
+        {"event_date": "2026-12-24", "event_name": "WINTER BREAK", "category": "Holidays"},
+        {"event_date": "2026-12-26", "event_name": "WINTER BREAK", "category": "Holidays"},
+        {"event_date": "2026-12-25", "event_name": "WINTER BREAK", "category": "Holidays"},
+        {"event_date": "2026-12-25", "event_name": "CHRISTMAS", "category": "Holidays"}
+      ]
+    }
+    """
+    result = AzureFoundryPlannerService._parse_model_content(content)
+    names = [event.event_name for event in result.events]
+    assert "CHRISTMAS" in names
+    assert "WINTER BREAK - DAY 1" in names
+    assert "WINTER BREAK - DAY 2" in names
+    assert "WINTER BREAK - DAY 3" in names
+    assert "WINTER BREAK" not in names
+    winter = [event for event in result.events if event.event_name.startswith("WINTER BREAK")]
+    assert [event.event_date for event in winter] == [
+        date(2026, 12, 24),
+        date(2026, 12, 25),
+        date(2026, 12, 26),
+    ]
+
+
 def test_parse_model_content_accepts_fenced_json():
     content = """```json
 {"planner_title": null, "events": [{"event_date": "2026-05-01", "event_name": "BUDDHA PURNIMA", "category": "holiday"}]}

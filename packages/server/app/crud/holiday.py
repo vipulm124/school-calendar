@@ -49,6 +49,48 @@ class HolidayCrud(BaseCrud[Holiday, HolidayCreateRequest, HolidayUpdateRequest])
         return result.scalars().first()
 
 
+    async def get_by_holiday_date_for_class(self, *, session: AsyncSession, student_class_id: UUID,  holiday_date: datetime.date):
+        """
+        Retrieve a holiday by its date for a class.
+        Args:
+            session: The database session.
+            student_class_id: The ID of the student class.
+            holiday_date: The date of the holiday.
+        Returns:
+            Holiday | None: The retrieved holiday, or None if not found.
+        """
+        query = select(self.model).where(
+            self.model.holiday_date == holiday_date,
+            self.model.student_class_id == str(student_class_id),
+            self.model.is_deleted.is_(False),
+        )
+        result = await session.execute(query)
+        return result.scalars().first()
+
+    async def list_by_student_class(self, *, session: AsyncSession, student_class_id: UUID):
+        """Return all non-deleted holidays for a student class, ordered by date."""
+        query = (
+            select(self.model)
+            .where(
+                self.model.student_class_id == str(student_class_id),
+                self.model.is_deleted.is_(False),
+            )
+            .order_by(self.model.holiday_date.asc())
+        )
+        result = await session.execute(query)
+        return list(result.scalars().all())
+
+    async def update_holiday_name(
+        self, *, session: AsyncSession, holiday_id: UUID, holiday_name: str, unique_identifier: str
+    ):
+        """Update only the holiday name for an existing row."""
+        holiday = await self.get_by_holiday_id(session=session, holiday_id=holiday_id)
+        if holiday is None:
+            raise HTTPException(status_code=404, detail=f"Holiday with ID '{holiday_id}' not found.")
+        holiday.holiday_name = holiday_name.strip().upper()
+        holiday.updated_by = unique_identifier
+        return await self._commit_and_refresh(session=session, db_obj=holiday)
+
     async def get_by_holiday_id(self, *, session: AsyncSession, holiday_id: UUID):
         """
         Retrieve a holiday by its ID.
@@ -94,9 +136,10 @@ class HolidayCrud(BaseCrud[Holiday, HolidayCreateRequest, HolidayUpdateRequest])
         Returns:
             Holiday: The created holiday.
         """
-        existing_holiday = await self.get_by_holiday_name_for_class(session=session, student_class_id=create_obj.student_class_id, holiday_name=create_obj.holiday_name)
+        existing_holiday = await self.get_by_holiday_date_for_class(session=session, student_class_id=create_obj.student_class_id, holiday_date=create_obj.holiday_date)
+        
         if existing_holiday:
-            raise HTTPException(status_code=400, detail=f"Holiday with name '{create_obj.holiday_name}' already exists for class with ID '{create_obj.student_class_id}'.")
+            raise HTTPException(status_code=400, detail=f"Holiday on date '{create_obj.holiday_date}' already exists for class with ID '{create_obj.student_class_id}'.")
 
         if isinstance(create_obj.holiday_date, str):
             try:

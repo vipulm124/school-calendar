@@ -3,7 +3,7 @@ from .base import BaseCrud
 from models import HolidayType
 from schemas import HolidayTypeCreateRequest, HolidayTypeUpdateRequest
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 from fastapi import HTTPException
 
 class HolidayTypeCrud(BaseCrud[HolidayType, HolidayTypeCreateRequest, HolidayTypeUpdateRequest]):
@@ -20,8 +20,9 @@ class HolidayTypeCrud(BaseCrud[HolidayType, HolidayTypeCreateRequest, HolidayTyp
         Returns:
             HolidayType | None: The retrieved holiday type, or None if not found.
         """
+        name = str(holiday_type).strip().upper()
         query = select(self.model).where(
-            self.model.holiday_type == holiday_type,
+            func.upper(self.model.holiday_type) == name,
             self.model.is_deleted.is_(False),
         )
         result = await session.execute(query)
@@ -57,7 +58,10 @@ class HolidayTypeCrud(BaseCrud[HolidayType, HolidayTypeCreateRequest, HolidayTyp
         Returns:
             HolidayType: The created holiday type.
         """
-        existing_type = await self.get_by_holiday_type_name(session=session, holiday_type=create_obj.holiday_type)
+        create_obj.holiday_type = str(create_obj.holiday_type).strip().upper()
+        existing_type = await self.get_by_holiday_type_name(
+            session=session, holiday_type=create_obj.holiday_type
+        )
         if existing_type:
             raise HTTPException(status_code=400, detail=f"Holiday type with name '{create_obj.holiday_type}' already exists.")
 

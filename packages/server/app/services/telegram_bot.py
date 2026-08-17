@@ -65,6 +65,7 @@ class TelegramBotService:
         chat_id: int | str,
         text: str,
         parse_mode: Optional[str] = "HTML",
+        reply_markup: Optional[dict[str, Any]] = None,
     ) -> bool:
         """Send one or more chat messages, chunking long text."""
         chunks = _chunk_text(text, MAX_MESSAGE_CHARS)
@@ -72,15 +73,35 @@ class TelegramBotService:
             return False
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            for chunk in chunks:
+            for index, chunk in enumerate(chunks):
                 payload: dict[str, Any] = {"chat_id": chat_id, "text": chunk}
                 if parse_mode:
                     payload["parse_mode"] = parse_mode
+                # Attach buttons only on the final chunk.
+                if reply_markup is not None and index == len(chunks) - 1:
+                    payload["reply_markup"] = reply_markup
                 response = await client.post(self._api_url("sendMessage"), json=payload)
                 if response.status_code >= 400:
                     raise TelegramBotError(
                         f"sendMessage failed ({response.status_code}): {response.text}"
                     )
+        return True
+
+    async def answer_callback_query(
+        self,
+        *,
+        callback_query_id: str,
+        text: Optional[str] = None,
+    ) -> bool:
+        payload: dict[str, Any] = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.post(self._api_url("answerCallbackQuery"), json=payload)
+        if response.status_code >= 400:
+            raise TelegramBotError(
+                f"answerCallbackQuery failed ({response.status_code}): {response.text}"
+            )
         return True
 
     async def download_image_from_message(self, message: dict[str, Any]) -> TelegramImage:
@@ -120,6 +141,18 @@ class TelegramBotService:
                 f"file download failed ({response.status_code}): {response.text}"
             )
         return response.content
+
+
+def upload_reject_keyboard() -> dict[str, Any]:
+    """Inline keyboard for confirming planner extract upload."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "👍 Upload", "callback_data": "upload"},
+                {"text": "👎 Reject", "callback_data": "reject"},
+            ]
+        ]
+    }
 
 
 def message_has_image(message: dict[str, Any]) -> bool:

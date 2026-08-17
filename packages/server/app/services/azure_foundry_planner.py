@@ -13,6 +13,7 @@ import httpx
 
 from core.config import config
 from schemas.planner_ocr import CellCategory, ParsedPlannerEvent, PlannerParseResult
+from services.leave_day_numbering import base_event_name
 
 EXTRACT_SYSTEM_PROMPT = """You extract school planner calendar events from an image.
 
@@ -35,7 +36,16 @@ Rules:
 - IGNORE blue/red/orange/purple/grey/white working days and other non-green/non-yellow cells.
 - event_name is the text inside the cell (e.g. HOLI, GOOD FRIDAY, OPEN HOUSE).
 - Build the full date from the month header (e.g. MARCH 2026) plus the day number in the cell.
-- If a green cell has no label, use "SUMMER BREAK" or the nearest break label when obvious.
+- If a green cell has no label, use the nearest break label when obvious (e.g. SUMMER BREAK / WINTER BREAK).
+- Multi-day / long-running leaves MUST use unique day-numbered names.
+  When the same leave spans multiple dates (e.g. several green cells that are all WINTER BREAK or SUMMER BREAK),
+  name them chronologically as:
+    WINTER BREAK - DAY 1
+    WINTER BREAK - DAY 2
+    WINTER BREAK - DAY 3
+  Do the same for SUMMER BREAK or any other repeated multi-day leave label.
+  Never output the exact same event_name more than once.
+- Single-day holidays keep their normal name (e.g. HOLI, GOOD FRIDAY).
 - Do not invent events that are not visible.
 - Sort events by date ascending.
 """
@@ -222,7 +232,38 @@ class AzureFoundryPlannerService:
                 events.append(parsed)
 
         events.sort(key=lambda event: (event.event_date, event.event_name))
+        events = cls._number_repeated_leave_names(events)
         return PlannerParseResult(events=events, planner_title=title)
+
+    @staticmethod
+    def _base_event_name(name: str) -> str:
+        return base_event_name(name)
+
+    @classmethod
+    def _number_repeated_leave_names(
+        cls, events: list[ParsedPlannerEvent]
+    ) -> list[ParsedPlannerEvent]:
+        """
+        Ensure multi-day leaves are unique: WINTER BREAK - DAY 1, DAY 2, ...
+
+        Runs after LLM parse so duplicate names still save under the holiday uniqueness rule.
+        """
+        groups: dict[str, list[int]] = {}
+        for index, event in enumerate(events):
+            base = cls._base_event_name(event.event_name)
+            groups.setdefault(base, []).append(index)
+
+        updated = list(events)
+        for base, indices in groups.items():
+            if len(indices) <= 1:
+                continue
+            indices.sort(key=lambda i: (updated[i].event_date, i))
+            for day_number, index in enumerate(indices, start=1):
+                event = updated[index]
+                updated[index] = event.model_copy(
+                    update={"event_name": f"{base} - DAY {day_number}"}
+                )
+        return updated
 
     @staticmethod
     def _load_json_object(content: str) -> dict[str, Any]:
