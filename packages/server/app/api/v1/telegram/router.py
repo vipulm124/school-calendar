@@ -10,10 +10,17 @@ from api.v1.planner.controller import PlannerController
 from core import Response
 from core.config import config
 from core.session import AsyncSessionLocal
+from services.calendar_query import (
+    CalendarQueryIntent,
+    CalendarQueryService,
+    parse_query_callback,
+    parse_query_text,
+)
 from services.telegram_bot import (
     TelegramBotService,
     format_events_table,
     message_has_image,
+    query_actions_keyboard,
     upload_reject_keyboard,
 )
 from services.telegram_ingest import TelegramIngestService, parse_class_label
@@ -35,6 +42,7 @@ async def telegram_webhook(request: Request):
     Handle Telegram updates.
 
     Flow: class name → planner photo → preview table → Upload / Reject buttons.
+    With a class set, query buttons answer upcoming / next / last / this month.
     """
     try:
         update: dict[str, Any] = await request.json()
@@ -119,12 +127,22 @@ async def _dispatch_update(
         if callback_id:
             await bot.answer_callback_query(callback_query_id=callback_id)
 
+        query_intent = parse_query_callback(data)
+        if query_intent is not None:
+            return await _handle_calendar_query(
+                bot=bot,
+                chat_id=chat_id,
+                session=session,
+                intent=query_intent,
+            )
+
         if data in REJECT_KEYWORDS:
             session.clear_pending_events()
             await bot.send_message(
                 chat_id=chat_id,
                 text="Data upload is rejected.",
                 parse_mode=None,
+                reply_markup=query_actions_keyboard() if session.class_label else None,
             )
             return {"ok": True, "action": "rejected"}
 
@@ -133,11 +151,11 @@ async def _dispatch_update(
 
         await bot.send_message(
             chat_id=chat_id,
-            text="Unknown action. Use the Upload or Reject buttons.",
+            text="Unknown action. Use the buttons below.",
             parse_mode=None,
             reply_markup=upload_reject_keyboard()
             if session.state == TelegramSessionState.AWAITING_CONFIRM
-            else None,
+            else (query_actions_keyboard() if session.class_label else None),
         )
         return {"ok": True, "action": "unknown_callback"}
 
@@ -147,11 +165,21 @@ async def _dispatch_update(
         return await _handle_image_extract(bot=bot, chat_id=chat_id, message=message, session=session)
 
     if not text:
-        await bot.send_message(chat_id=chat_id, text=_help_text(session), parse_mode=None)
+        await bot.send_message(
+            chat_id=chat_id,
+            text=_help_text(session),
+            parse_mode=None,
+            reply_markup=query_actions_keyboard() if session.class_label else None,
+        )
         return {"ok": True, "action": "help"}
 
     if normalized in HELP_KEYWORDS:
-        await bot.send_message(chat_id=chat_id, text=_help_text(session), parse_mode=None)
+        await bot.send_message(
+            chat_id=chat_id,
+            text=_help_text(session),
+            parse_mode=None,
+            reply_markup=query_actions_keyboard() if session.class_label else None,
+        )
         return {"ok": True, "action": "help"}
 
     if session.state == TelegramSessionState.AWAITING_CONFIRM:
@@ -162,6 +190,7 @@ async def _dispatch_update(
                 chat_id=chat_id,
                 text="Data upload is rejected.",
                 parse_mode=None,
+                reply_markup=query_actions_keyboard() if session.class_label else None,
             )
             return {"ok": True, "action": "rejected"}
 
@@ -175,6 +204,15 @@ async def _dispatch_update(
             reply_markup=upload_reject_keyboard(),
         )
         return {"ok": True, "action": "awaiting_confirm"}
+
+    query_intent = parse_query_text(text)
+    if query_intent is not None:
+        return await _handle_calendar_query(
+            bot=bot,
+            chat_id=chat_id,
+            session=session,
+            intent=query_intent,
+        )
 
     # Any other text is treated as class name (asked first).
     try:
@@ -192,11 +230,46 @@ async def _dispatch_update(
         chat_id=chat_id,
         text=(
             f"Class set to {label}.\n"
-            "Now send the planner photo to extract Holidays/PTC."
+            "Send a planner photo to extract Holidays/PTC,\n"
+            "or tap a button to ask about the calendar."
         ),
         parse_mode=None,
+        reply_markup=query_actions_keyboard(),
     )
     return {"ok": True, "action": "class_set", "class_label": label}
+
+
+async def _handle_calendar_query(
+    *,
+    bot: TelegramBotService,
+    chat_id: int | str,
+    session,
+    intent: CalendarQueryIntent,
+) -> dict[str, Any]:
+    if not session.class_name or not session.section_name:
+        await bot.send_message(
+            chat_id=chat_id,
+            text="Please send the class name first (e.g. 5-A), then tap a question.",
+            parse_mode=None,
+        )
+        return {"ok": False, "action": "query_need_class", "intent": intent.value}
+
+    async with AsyncSessionLocal() as db:
+        answer = await CalendarQueryService().answer(
+            session=db,
+            intent=intent,
+            class_name=session.class_name,
+            section_name=session.section_name,
+            class_label=session.class_label,
+        )
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text=answer,
+        parse_mode=None,
+        reply_markup=query_actions_keyboard(),
+    )
+    return {"ok": True, "action": "calendar_query", "intent": intent.value}
 
 
 async def _handle_image_extract(
@@ -232,6 +305,7 @@ async def _handle_image_extract(
             chat_id=chat_id,
             text=f"Extraction failed.\n{detail}",
             parse_mode=None,
+            reply_markup=query_actions_keyboard(),
         )
         return {"ok": False, "action": "extract_failed", "error": detail, "event_count": 0}
 
@@ -256,8 +330,9 @@ async def _handle_image_extract(
         session.clear_pending_events()
         await bot.send_message(
             chat_id=chat_id,
-            text="Nothing to upload. Send another photo, or send a new class name.",
+            text="Nothing to upload. Send another photo, or ask about the calendar.",
             parse_mode=None,
+            reply_markup=query_actions_keyboard(),
         )
         return {
             "ok": True,
@@ -296,6 +371,7 @@ async def _handle_upload(
             chat_id=chat_id,
             text="No pending data to upload. Send a class name, then a planner photo.",
             parse_mode=None,
+            reply_markup=query_actions_keyboard() if session.class_label else None,
         )
         return {"ok": False, "action": "nothing_to_upload"}
 
@@ -314,6 +390,7 @@ async def _handle_upload(
                 chat_id=chat_id,
                 text=f"Upload failed.\n{exc}",
                 parse_mode=None,
+                reply_markup=query_actions_keyboard(),
             )
             return {"ok": False, "action": "upload_failed", "error": str(exc)}
 
@@ -344,7 +421,12 @@ async def _handle_upload(
         lines.append("Other skip reasons:")
         lines.extend(f"- {err}" for err in errors[:10])
 
-    await bot.send_message(chat_id=chat_id, text="\n".join(lines), parse_mode=None)
+    await bot.send_message(
+        chat_id=chat_id,
+        text="\n".join(lines),
+        parse_mode=None,
+        reply_markup=query_actions_keyboard(),
+    )
     return {"ok": True, "action": "uploaded", **summary}
 
 
@@ -358,6 +440,6 @@ def _help_text(session) -> str:
         "School Calendar bot\n"
         f"{class_line}"
         "1) Send class name first (e.g. 5-A)\n"
-        "2) Send planner photo\n"
-        "3) Tap Upload or Reject"
+        "2) Send planner photo, or tap a question button\n"
+        "3) For photos: tap Upload or Reject"
     )

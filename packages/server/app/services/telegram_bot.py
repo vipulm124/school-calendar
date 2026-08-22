@@ -155,6 +155,22 @@ def upload_reject_keyboard() -> dict[str, Any]:
     }
 
 
+def query_actions_keyboard() -> dict[str, Any]:
+    """Inline keyboard for common parent calendar questions."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Upcoming holidays", "callback_data": "query:upcoming"},
+                {"text": "This month", "callback_data": "query:this_month"},
+            ],
+            [
+                {"text": "Next PTM", "callback_data": "query:next_ptm"},
+                {"text": "Last PTM", "callback_data": "query:last_ptm"},
+            ],
+        ]
+    }
+
+
 def message_has_image(message: dict[str, Any]) -> bool:
     """Return True when the message contains a photo or image document."""
     if message.get("photo"):
