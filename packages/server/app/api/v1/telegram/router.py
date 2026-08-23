@@ -49,6 +49,8 @@ async def telegram_webhook(request: Request):
     except Exception:
         update = {}
 
+    bot = TelegramBotService()
+
     update_id = update.get("update_id")
     callback_query = update.get("callback_query") or {}
     message = update.get("message") or update.get("edited_message") or {}
@@ -56,18 +58,58 @@ async def telegram_webhook(request: Request):
         message = callback_query.get("message") or message
 
     chat = message.get("chat") or {}
-    chat_id = chat.get("id")
+    chat_id = chat.get("id", None)
     from_user = (callback_query.get("from") if callback_query else None) or message.get("from") or {}
+    user_id = from_user.get("id", None)
+
+    # TEMP: echo Telegram user_id to the user, then return it
+    # if chat_id is not None and config.TELEGRAM_BOT_TOKEN:
+    #     try:
+    #         await bot.send_message(
+    #             chat_id=chat_id,
+    #             text=f"Telegram user_id: {user_id}",
+    #             parse_mode=None,
+    #         )
+    #     except Exception:
+    #         pass
+    # return Response.success(
+    #     body={"user_id": user_id},
+    #     message="Telegram user_id",
+    #     status_code=200,
+    # )
+
+    if str(user_id) not in config.ADMIN_USER_ID:
+        if chat_id is not None and config.TELEGRAM_BOT_TOKEN:
+
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"Unauthorized user. Only admin users can use this bot.",
+                    parse_mode=None,
+                    )
+                telegram_reply_sent = True
+            except Exception as send_exc:  # noqa: BLE001
+                telegram_reply_error = str(send_exc)
+                telegram_reply_error = f"{telegram_reply_error}; reply failed: {send_exc}"
+
+            return Response.success(
+                body={"ok": True, "message": "Unauthorized user", "user_id": user_id},
+                message="Unauthorized user",
+                status_code=200,
+            )
+        
     text = (message.get("text") or "").strip()
     callback_data = str(callback_query.get("data") or "").strip()
     has_photo = bool(message.get("photo")) and not callback_query
     has_document = bool(message.get("document")) and not callback_query
 
+    if message_has_image(message) and str(user_id) not in config.ADMIN_USER_ID and chat_id and user_id:
+        return await unauthorized_response(bot=bot, chat_id=chat_id, user_id=user_id) 
+
     telegram_reply_sent = False
     telegram_reply_error: Optional[str] = None
     action_summary: Optional[dict[str, Any]] = None
 
-    bot = TelegramBotService()
     if chat_id is not None and config.TELEGRAM_BOT_TOKEN:
         try:
             action_summary = await _dispatch_update(
@@ -443,3 +485,23 @@ def _help_text(session) -> str:
         "2) Send planner photo, or tap a question button\n"
         "3) For photos: tap Upload or Reject"
     )
+
+
+async def unauthorized_response(bot: TelegramBotService, chat_id: int | str, user_id: int | str) -> Response:
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"Unauthorized user. Only admin users can use this feature of uploading photos/documents.",
+            parse_mode=None,
+            )
+        telegram_reply_sent = True
+    except Exception as send_exc:  # noqa: BLE001
+        telegram_reply_error = str(send_exc)
+        telegram_reply_error = f"{telegram_reply_error}; reply failed: {send_exc}"
+        telegram_reply_sent = False
+    
+    return Response.success(
+        body={"ok": True, "message": "Unauthorized user", "user_id": user_id, "telegram_reply_sent": telegram_reply_sent},
+        message="Unauthorized user",
+        status_code=200,
+        )

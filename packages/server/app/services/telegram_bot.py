@@ -14,6 +14,7 @@ from core.config import config
 TELEGRAM_API_BASE = "https://api.telegram.org"
 MAX_MESSAGE_CHARS = 3500
 IMAGE_DOCUMENT_MIME_PREFIXES = ("image/",)
+DOCUMENT_MIME_PREFIXES = ("application/",)
 IMAGE_DOCUMENT_EXTENSIONS = {
     ".jpg",
     ".jpeg",
@@ -148,8 +149,8 @@ def upload_reject_keyboard() -> dict[str, Any]:
     return {
         "inline_keyboard": [
             [
-                {"text": "👍 Upload", "callback_data": "upload"},
-                {"text": "👎 Reject", "callback_data": "reject"},
+                {"text": "👍 Upload", "callback_data": "upload", "style": "success"},
+                {"text": "👎 Reject", "callback_data": "reject", "style": "danger"},
             ]
         ]
     }
@@ -160,12 +161,12 @@ def query_actions_keyboard() -> dict[str, Any]:
     return {
         "inline_keyboard": [
             [
-                {"text": "Upcoming holidays", "callback_data": "query:upcoming"},
-                {"text": "This month", "callback_data": "query:this_month"},
+                {"text": "Upcoming holidays", "callback_data": "query:upcoming", "style": "primary"},
+                {"text": "This month", "callback_data": "query:this_month", "style": "primary"},
             ],
             [
-                {"text": "Next PTM", "callback_data": "query:next_ptm"},
-                {"text": "Last PTM", "callback_data": "query:last_ptm"},
+                {"text": "Next PTM", "callback_data": "query:next_ptm", "style": "primary"},
+                {"text": "Last PTM", "callback_data": "query:last_ptm", "style": "primary"},
             ],
         ]
     }
@@ -177,7 +178,7 @@ def message_has_image(message: dict[str, Any]) -> bool:
         return True
     document = message.get("document") or {}
     mime = str(document.get("mime_type") or "").lower()
-    if mime.startswith(IMAGE_DOCUMENT_MIME_PREFIXES):
+    if mime.startswith(IMAGE_DOCUMENT_MIME_PREFIXES) or mime.startswith(DOCUMENT_MIME_PREFIXES):
         return True
     name = str(document.get("file_name") or "").lower()
     return Path(name).suffix in IMAGE_DOCUMENT_EXTENSIONS

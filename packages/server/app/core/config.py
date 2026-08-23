@@ -3,9 +3,13 @@ App wide configuration for all the environments.
 This module handles loading of environment variables for the application.
 """
 
-from pathlib import Path
-from typing import Optional
+from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any, Optional
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,11 +58,37 @@ class Config(BaseSettings):
     # Telegram bot
     TELEGRAM_BOT_TOKEN: str = ""
 
+    # Telegram admin user ids. In .env use either:
+    #   ADMIN_USER_ID='["8057453587","123"]'   (JSON list — preferred)
+    #   ADMIN_USER_ID=8057453587,123           (comma-separated)
+    ADMIN_USER_ID: list[str] = []
+
     model_config = SettingsConfigDict(
         env_file=_find_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("ADMIN_USER_ID", mode="before")
+    @classmethod
+    def parse_admin_user_ids(cls, value: Any) -> list[str]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, (int, float)):
+            return [str(int(value))]
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+            if text.startswith("["):
+                parsed = json.loads(text)
+                if not isinstance(parsed, list):
+                    raise ValueError("ADMIN_USER_ID JSON must be a list")
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return [part.strip() for part in text.split(",") if part.strip()]
+        raise ValueError("ADMIN_USER_ID must be a list or comma-separated string")
 
 
 config = Config()
