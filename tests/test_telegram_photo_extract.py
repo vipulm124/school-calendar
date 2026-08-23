@@ -72,6 +72,29 @@ class FakeController:
         }
 
 
+class FakeIngestPassthrough:
+    async def continue_leave_day_numbers(self, *, session, class_name, section_name, events):  # noqa: ARG002
+        return events
+
+    async def save_events(self, *, session, class_name, section_name, events, unique_identifier="telegram"):  # noqa: ARG002
+        return {
+            "student_class_id": "abc",
+            "created": len(events),
+            "skipped": 0,
+            "skipped_existing": [],
+            "errors": [],
+            "holiday_types_used": ["Holidays"],
+        }
+
+
+class FakeAsyncSession:
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, *args):  # noqa: ANN002
+        return False
+
+
 def test_parse_class_label():
     assert parse_class_label("5-A") == ("5", "A", "5-A")
     assert parse_class_label("FS1") == ("FS1", "-", "FS1")
@@ -123,7 +146,8 @@ def test_photo_without_class_asks_for_class(monkeypatch):
 def test_class_then_photo_then_reject_button(monkeypatch):
     telegram_sessions.clear(42)
     fake_bot = FakeBot()
-    client = _client(monkeypatch, fake_bot, FakeController)
+    monkeypatch.setattr("api.v1.telegram.router.AsyncSessionLocal", lambda: FakeAsyncSession())
+    client = _client(monkeypatch, fake_bot, FakeController, lambda: FakeIngestPassthrough())
 
     client.post(
         "/telegram/webhook",
@@ -167,6 +191,9 @@ def test_class_then_photo_then_upload_button_with_skip_reason(monkeypatch):
     fake_bot = FakeBot()
 
     class FakeIngest:
+        async def continue_leave_day_numbers(self, *, session, class_name, section_name, events):  # noqa: ARG002
+            return events
+
         async def save_events(self, *, session, class_name, section_name, events, unique_identifier="telegram"):  # noqa: ARG002
             return {
                 "student_class_id": "abc",
@@ -179,13 +206,6 @@ def test_class_then_photo_then_upload_button_with_skip_reason(monkeypatch):
                 "errors": [],
                 "holiday_types_used": ["Holidays"],
             }
-
-    class FakeAsyncSession:
-        async def __aenter__(self):
-            return object()
-
-        async def __aexit__(self, *args):  # noqa: ANN002
-            return False
 
     monkeypatch.setattr("api.v1.telegram.router.AsyncSessionLocal", lambda: FakeAsyncSession())
     client = _client(monkeypatch, fake_bot, FakeController, lambda: FakeIngest())
@@ -235,4 +255,5 @@ def test_help_command(monkeypatch):
         json={"update_id": 1, "message": {"chat": {"id": 9}, "from": {"id": 1}, "text": "/help"}},
     )
     assert response.json()["details"]["action"]["action"] == "help"
-    assert "Tap Upload or Reject" in fake_bot.sent[-1]
+    assert "tap a question button" in fake_bot.sent[-1].lower()
+    assert "Upload or Reject" in fake_bot.sent[-1]
