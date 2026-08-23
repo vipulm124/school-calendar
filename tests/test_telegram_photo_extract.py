@@ -23,6 +23,7 @@ def _client(monkeypatch, fake_bot, fake_controller=None, fake_ingest=None):
     app = FastAPI()
     app.include_router(telegram_router)
     monkeypatch.setattr("api.v1.telegram.router.config.TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr("api.v1.telegram.router.config.ADMIN_USER_ID", ["1", "99"])
     monkeypatch.setattr("api.v1.telegram.router.TelegramBotService", lambda: fake_bot)
     if fake_controller is not None:
         monkeypatch.setattr("api.v1.telegram.router.PlannerController", fake_controller)
@@ -256,4 +257,4 @@ def test_help_command(monkeypatch):
     )
     assert response.json()["details"]["action"]["action"] == "help"
     assert "tap a question button" in fake_bot.sent[-1].lower()
-    assert "Upload or Reject" in fake_bot.sent[-1]
+    assert "planner photo" in fake_bot.sent[-1].lower()

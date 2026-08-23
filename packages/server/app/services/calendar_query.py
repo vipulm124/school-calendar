@@ -275,7 +275,14 @@ def _format_single(
     today: datetime.date,
 ) -> str:
     when = _format_when(event.event_date, today=today)
-    return f"{title}:\n{event.name} — {when}"
+    type_label = _type_badge(event.holiday_type)
+    return (
+        f"✦ {title}\n"
+        f"{'─' * 22}\n"
+        f"{event.name}\n"
+        f"{when}"
+        + (f"\n{type_label}" if type_label else "")
+    )
 
 
 def _format_list(
@@ -286,29 +293,42 @@ def _format_list(
     today: datetime.date,
 ) -> str:
     if not events:
-        return empty
-    lines = [f"{title}:"]
+        return f"✦ {empty}"
+    lines = [f"✦ {title}", "─" * 22]
     for event in events:
+        badge = _type_badge(event.holiday_type)
+        prefix = f"{badge} " if badge else "• "
         if event.end_date and event.end_date != event.event_date:
-            span = f"{_format_date(event.event_date)} to {_format_date(event.end_date)}"
-            lines.append(f"• {event.name} — {span}")
+            span = f"{_format_date(event.event_date)} → {_format_date(event.end_date)}"
+            lines.append(f"{prefix}{event.name}")
+            lines.append(f"   {span}")
         else:
-            lines.append(f"• {event.name} — {_format_when(event.event_date, today=today)}")
+            lines.append(f"{prefix}{event.name}")
+            lines.append(f"   {_format_when(event.event_date, today=today)}")
     return "\n".join(lines)
+
+
+def _type_badge(holiday_type: str) -> str:
+    normalized = (holiday_type or "").strip().upper()
+    if normalized in {"PTC", "PTM"}:
+        return "👥"
+    if normalized in {"HOLIDAYS", "HOLIDAY"}:
+        return "🌴"
+    return ""
 
 
 def _format_when(event_date: datetime.date, *, today: datetime.date) -> str:
     label = _format_date(event_date)
     delta = (event_date - today).days
     if delta == 0:
-        return f"{label} (today)"
+        return f"{label} · today"
     if delta == 1:
-        return f"{label} (tomorrow)"
+        return f"{label} · tomorrow"
     if delta == -1:
-        return f"{label} (yesterday)"
+        return f"{label} · yesterday"
     if delta > 1:
-        return f"{label} (in {delta} days)"
-    return f"{label} ({abs(delta)} days ago)"
+        return f"{label} · in {delta} days"
+    return f"{label} · {abs(delta)} days ago"
 
 
 def _format_date(event_date: datetime.date) -> str:
