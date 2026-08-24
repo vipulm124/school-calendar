@@ -24,6 +24,7 @@ def _client(monkeypatch, fake_bot, fake_controller=None, fake_ingest=None):
     app.include_router(telegram_router)
     monkeypatch.setattr("api.v1.telegram.router.config.TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setattr("api.v1.telegram.router.config.ADMIN_USER_ID", ["1", "99"])
+    monkeypatch.setattr("api.v1.telegram.router.config.ALLOWED_USER_ID", ["1", "99"])
     monkeypatch.setattr("api.v1.telegram.router.TelegramBotService", lambda: fake_bot)
     if fake_controller is not None:
         monkeypatch.setattr("api.v1.telegram.router.PlannerController", fake_controller)

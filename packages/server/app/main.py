@@ -2,15 +2,38 @@
 This module contains the FastAPI application for the server.
 """
 
+from __future__ import annotations
+
 import sys
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.v1 import student_class_router, holiday_type_router, holiday_router, planner_router, telegram_router
+from api.v1 import (
+    student_class_router,
+    holiday_type_router,
+    holiday_router,
+    planner_router,
+    telegram_router,
+)
+from core.session import engine
+from models.telegram_access import TelegramAccessUser
+
+
+async def _ensure_telegram_access_table() -> None:
+    """Create allowlist table if missing (deploy may not run alembic automatically)."""
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            lambda sync_conn: TelegramAccessUser.__table__.create(sync_conn, checkfirst=True)
+        )
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await _ensure_telegram_access_table()
+    yield
 
 
 app = FastAPI(
@@ -23,6 +46,7 @@ app = FastAPI(
     openapi_url="/openapi.json",
     docs_url="/docs",
     redoc_url="/redocs",
+    lifespan=lifespan,
 )
 
 

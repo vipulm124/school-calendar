@@ -32,6 +32,27 @@ def _find_env_file() -> Optional[str]:
     return None
 
 
+def _parse_id_list(value: Any, *, field_name: str) -> list[str]:
+    """Parse JSON list or comma-separated Telegram user ids."""
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, (int, float)):
+        return [str(int(value))]
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            parsed = json.loads(text)
+            if not isinstance(parsed, list):
+                raise ValueError(f"{field_name} JSON must be a list")
+            return [str(item).strip() for item in parsed if str(item).strip()]
+        return [part.strip() for part in text.split(",") if part.strip()]
+    raise ValueError(f"{field_name} must be a list or comma-separated string")
+
+
 class Config(BaseSettings):
     """
     Configurations class that loads environment variables.
@@ -58,9 +79,15 @@ class Config(BaseSettings):
     # Telegram bot
     TELEGRAM_BOT_TOKEN: str = ""
 
-    # Telegram admin user ids. In .env use either:
-    #   ADMIN_USER_ID='["8057453587","123"]'   (JSON list — preferred)
-    #   ADMIN_USER_ID=8057453587,123           (comma-separated)
+    # Who may use the bot at all (queries + class setup).
+    #   ALLOWED_USER_ID='["111","222"]'
+    #   ALLOWED_USER_ID=111,222
+    # Admins are always allowed even if omitted here.
+    # If both ALLOWED_USER_ID and ADMIN_USER_ID are empty, nobody can use the bot.
+    ALLOWED_USER_ID: list[str] = []
+
+    # Who may upload/extract planner photos (and confirm Upload).
+    #   ADMIN_USER_ID='["8057453587"]'
     ADMIN_USER_ID: list[str] = []
 
     model_config = SettingsConfigDict(
@@ -69,26 +96,15 @@ class Config(BaseSettings):
         extra="ignore",
     )
 
+    @field_validator("ALLOWED_USER_ID", mode="before")
+    @classmethod
+    def parse_allowed_user_ids(cls, value: Any) -> list[str]:
+        return _parse_id_list(value, field_name="ALLOWED_USER_ID")
+
     @field_validator("ADMIN_USER_ID", mode="before")
     @classmethod
     def parse_admin_user_ids(cls, value: Any) -> list[str]:
-        if value is None or value == "":
-            return []
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, (int, float)):
-            return [str(int(value))]
-        if isinstance(value, str):
-            text = value.strip()
-            if not text:
-                return []
-            if text.startswith("["):
-                parsed = json.loads(text)
-                if not isinstance(parsed, list):
-                    raise ValueError("ADMIN_USER_ID JSON must be a list")
-                return [str(item).strip() for item in parsed if str(item).strip()]
-            return [part.strip() for part in text.split(",") if part.strip()]
-        raise ValueError("ADMIN_USER_ID must be a list or comma-separated string")
+        return _parse_id_list(value, field_name="ADMIN_USER_ID")
 
 
 config = Config()
