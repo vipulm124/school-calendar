@@ -149,24 +149,46 @@ def upload_reject_keyboard() -> dict[str, Any]:
     return {
         "inline_keyboard": [
             [
-                {"text": "👍 Upload", "callback_data": "upload", "style": "success"},
-                {"text": "👎 Reject", "callback_data": "reject", "style": "danger"},
+                {"text": "✅  Upload", "callback_data": "upload", "style": "success"},
+                {"text": "❌  Reject", "callback_data": "reject", "style": "danger"},
             ]
         ]
     }
 
 
 def query_actions_keyboard() -> dict[str, Any]:
-    """Inline keyboard for common parent calendar questions."""
+    """
+    Inline keyboard for common parent calendar questions.
+
+    Full-width rows + emoji labels + Bot API button styles read clearer on mobile.
+    """
     return {
         "inline_keyboard": [
             [
-                {"text": "Upcoming holidays", "callback_data": "query:upcoming", "style": "primary"},
-                {"text": "This month", "callback_data": "query:this_month", "style": "primary"},
+                {
+                    "text": "📅  Upcoming holidays",
+                    "callback_data": "query:upcoming",
+                    "style": "success",
+                }
             ],
             [
-                {"text": "Next PTM", "callback_data": "query:next_ptm", "style": "primary"},
-                {"text": "Last PTM", "callback_data": "query:last_ptm", "style": "primary"},
+                {
+                    "text": "🗓️  This month holidays",
+                    "callback_data": "query:this_month",
+                    "style": "primary",
+                }
+            ],
+            [
+                {
+                    "text": "➡️  Next PTM",
+                    "callback_data": "query:next_ptm",
+                    "style": "primary",
+                },
+                {
+                    "text": "⬅️  Last PTM",
+                    "callback_data": "query:last_ptm",
+                    "style": "primary",
+                },
             ],
         ]
     }

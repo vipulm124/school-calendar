@@ -12,7 +12,7 @@ APP_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP_DIR))
 
 from models import Base
-from models import holiday, holiday_types, student_class  # noqa: F401
+from models import holiday, holiday_types, student_class, telegram_access  # noqa: F401
 from alembic import context
 
 # Load .env from the repository root so DATABASE_URL is available for migrations.

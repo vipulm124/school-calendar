@@ -16,6 +16,10 @@ from services.calendar_query import (
     parse_query_callback,
     parse_query_text,
 )
+from services.telegram_access import (
+    TelegramAccessService,
+    parse_access_callback,
+)
 from services.telegram_bot import (
     TelegramBotService,
     format_events_table,
@@ -62,49 +66,54 @@ async def telegram_webhook(request: Request):
     from_user = (callback_query.get("from") if callback_query else None) or message.get("from") or {}
     user_id = from_user.get("id", None)
 
-    # TEMP: echo Telegram user_id to the user, then return it
-    # if chat_id is not None and config.TELEGRAM_BOT_TOKEN:
-    #     try:
-    #         await bot.send_message(
-    #             chat_id=chat_id,
-    #             text=f"Telegram user_id: {user_id}",
-    #             parse_mode=None,
-    #         )
-    #     except Exception:
-    #         pass
-    # return Response.success(
-    #     body={"user_id": user_id},
-    #     message="Telegram user_id",
-    #     status_code=200,
-    # )
-
-    if str(user_id) not in config.ADMIN_USER_ID:
-        if chat_id is not None and config.TELEGRAM_BOT_TOKEN:
-
-            try:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"Unauthorized user. Only admin users can use this bot.",
-                    parse_mode=None,
-                    )
-                telegram_reply_sent = True
-            except Exception as send_exc:  # noqa: BLE001
-                telegram_reply_error = str(send_exc)
-                telegram_reply_error = f"{telegram_reply_error}; reply failed: {send_exc}"
-
-            return Response.success(
-                body={"ok": True, "message": "Unauthorized user", "user_id": user_id},
-                message="Unauthorized user",
-                status_code=200,
-            )
-        
     text = (message.get("text") or "").strip()
     callback_data = str(callback_query.get("data") or "").strip()
     has_photo = bool(message.get("photo")) and not callback_query
     has_document = bool(message.get("document")) and not callback_query
 
-    if message_has_image(message) and str(user_id) not in config.ADMIN_USER_ID and chat_id and user_id:
-        return await unauthorized_response(bot=bot, chat_id=chat_id, user_id=user_id) 
+    # Allowlist: config admins/allowed + DB-approved users.
+    # Unknown users trigger an access request to admins (Approve / Deny).
+    if chat_id is not None and user_id is not None:
+        access_action = parse_access_callback(callback_data)
+        if access_action is not None:
+            # Admins handle approve/deny even before general allow checks.
+            callback_id = str(callback_query.get("id") or "")
+            if callback_id:
+                try:
+                    await bot.answer_callback_query(callback_query_id=callback_id)
+                except Exception:
+                    pass
+            if not _is_admin(user_id):
+                return await unauthorized_response(bot=bot, chat_id=chat_id, user_id=user_id)
+            action_summary = await _handle_access_decision(
+                bot=bot,
+                admin_user_id=str(user_id),
+                action=access_action[0],
+                target_user_id=access_action[1],
+            )
+            return Response.success(
+                body={
+                    "ok": True,
+                    "message": "Access decision processed",
+                    "from_user_id": user_id,
+                    "action": action_summary,
+                },
+                message="Access decision processed",
+                status_code=200,
+            )
+
+        if not await _user_may_access(user_id):
+            return await _handle_access_request(
+                bot=bot,
+                chat_id=chat_id,
+                user_id=user_id,
+                from_user=from_user,
+            )
+
+    # Photo/document ingest is admin-only.
+    if message_has_image(message) and chat_id is not None and user_id is not None:
+        if not _is_admin(user_id):
+            return await unauthorized_response(bot=bot, chat_id=chat_id, user_id=user_id)
 
     telegram_reply_sent = False
     telegram_reply_error: Optional[str] = None
@@ -115,6 +124,7 @@ async def telegram_webhook(request: Request):
             action_summary = await _dispatch_update(
                 bot=bot,
                 chat_id=chat_id,
+                user_id=user_id,
                 message=message if not callback_query else {},
                 text=text if not callback_query else "",
                 callback_query=callback_query or None,
@@ -153,10 +163,80 @@ async def telegram_webhook(request: Request):
     )
 
 
+def _is_admin(user_id: Any) -> bool:
+    return str(user_id) in config.ADMIN_USER_ID
+
+
+def _is_env_allowed(user_id: Any) -> bool:
+    uid = str(user_id)
+    return uid in config.ADMIN_USER_ID or uid in config.ALLOWED_USER_ID
+
+
+async def _user_may_access(user_id: Any) -> bool:
+    if _is_env_allowed(user_id):
+        return True
+    async with AsyncSessionLocal() as db:
+        return await TelegramAccessService().is_db_approved(
+            session=db, telegram_user_id=str(user_id)
+        )
+
+
+async def _handle_access_request(
+    *,
+    bot: TelegramBotService,
+    chat_id: int | str,
+    user_id: Any,
+    from_user: dict[str, Any],
+) -> Response:
+    async with AsyncSessionLocal() as db:
+        summary = await TelegramAccessService().request_access(
+            session=db,
+            bot=bot,
+            telegram_user_id=str(user_id),
+            chat_id=chat_id,
+            from_user=from_user,
+        )
+    return Response.success(
+        body={"ok": True, "message": "Access request handled", "action": summary},
+        message="Access request handled",
+        status_code=200,
+    )
+
+
+async def _handle_access_decision(
+    *,
+    bot: TelegramBotService,
+    admin_user_id: str,
+    action: str,
+    target_user_id: str,
+) -> dict[str, Any]:
+    async with AsyncSessionLocal() as db:
+        summary = await TelegramAccessService().handle_admin_decision(
+            session=db,
+            bot=bot,
+            admin_user_id=admin_user_id,
+            action=action,
+            target_user_id=target_user_id,
+        )
+
+    if summary.get("ok"):
+        label = summary.get("display_name") or target_user_id
+        if action == "approve":
+            note = f"Approved access for {label} ({target_user_id})."
+        else:
+            note = f"Denied access for {label} ({target_user_id})."
+        try:
+            await bot.send_message(chat_id=admin_user_id, text=note, parse_mode=None)
+        except Exception:
+            pass
+    return summary
+
+
 async def _dispatch_update(
     *,
     bot: TelegramBotService,
     chat_id: int | str,
+    user_id: Any,
     message: dict[str, Any],
     text: str,
     callback_query: Optional[dict[str, Any]] = None,
@@ -189,6 +269,14 @@ async def _dispatch_update(
             return {"ok": True, "action": "rejected"}
 
         if data in UPLOAD_KEYWORDS:
+            if not _is_admin(user_id):
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="Unauthorized user. Only admin users can upload planner photos.",
+                    parse_mode=None,
+                    reply_markup=query_actions_keyboard() if session.class_label else None,
+                )
+                return {"ok": False, "action": "unauthorized_upload", "user_id": user_id}
             return await _handle_upload(bot=bot, chat_id=chat_id, session=session)
 
         await bot.send_message(
@@ -204,6 +292,14 @@ async def _dispatch_update(
     normalized = text.lower().strip()
 
     if message_has_image(message):
+        if not _is_admin(user_id):
+            await bot.send_message(
+                chat_id=chat_id,
+                text="Unauthorized user. Only admin users can upload planner photos.",
+                parse_mode=None,
+                reply_markup=query_actions_keyboard() if session.class_label else None,
+            )
+            return {"ok": False, "action": "unauthorized_upload", "user_id": user_id}
         return await _handle_image_extract(bot=bot, chat_id=chat_id, message=message, session=session)
 
     if not text:
@@ -237,6 +333,14 @@ async def _dispatch_update(
             return {"ok": True, "action": "rejected"}
 
         if normalized in UPLOAD_KEYWORDS:
+            if not _is_admin(user_id):
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="Unauthorized user. Only admin users can upload planner photos.",
+                    parse_mode=None,
+                    reply_markup=query_actions_keyboard() if session.class_label else None,
+                )
+                return {"ok": False, "action": "unauthorized_upload", "user_id": user_id}
             return await _handle_upload(bot=bot, chat_id=chat_id, session=session)
 
         await bot.send_message(
@@ -271,9 +375,8 @@ async def _dispatch_update(
     await bot.send_message(
         chat_id=chat_id,
         text=(
-            f"Class set to {label}.\n"
-            "Send a planner photo to extract Holidays/PTC,\n"
-            "or tap a button to ask about the calendar."
+            f"Class set to {label}.\n\n"
+            "What would you like to check?"
         ),
         parse_mode=None,
         reply_markup=query_actions_keyboard(),
@@ -482,8 +585,8 @@ def _help_text(session) -> str:
         "School Calendar bot\n"
         f"{class_line}"
         "1) Send class name first (e.g. 5-A)\n"
-        "2) Send planner photo, or tap a question button\n"
-        "3) For photos: tap Upload or Reject"
+        "2) Tap a question button (Upcoming / Next PTM / …)\n"
+        "3) Admins can also send a planner photo to Upload"
     )
 
 
@@ -491,17 +594,32 @@ async def unauthorized_response(bot: TelegramBotService, chat_id: int | str, use
     try:
         await bot.send_message(
             chat_id=chat_id,
-            text=f"Unauthorized user. Only admin users can use this feature of uploading photos/documents.",
+            text="Unauthorized. Only admin users can upload planner photos.",
             parse_mode=None,
-            )
+        )
         telegram_reply_sent = True
     except Exception as send_exc:  # noqa: BLE001
         telegram_reply_error = str(send_exc)
-        telegram_reply_error = f"{telegram_reply_error}; reply failed: {send_exc}"
         telegram_reply_sent = False
-    
+        return Response.success(
+            body={
+                "ok": True,
+                "message": "Unauthorized user",
+                "user_id": user_id,
+                "telegram_reply_sent": telegram_reply_sent,
+                "telegram_reply_error": telegram_reply_error,
+            },
+            message="Unauthorized user",
+            status_code=200,
+        )
+
     return Response.success(
-        body={"ok": True, "message": "Unauthorized user", "user_id": user_id, "telegram_reply_sent": telegram_reply_sent},
+        body={
+            "ok": True,
+            "message": "Unauthorized user",
+            "user_id": user_id,
+            "telegram_reply_sent": telegram_reply_sent,
+        },
         message="Unauthorized user",
         status_code=200,
-        )
+    )

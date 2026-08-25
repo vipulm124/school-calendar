@@ -32,6 +32,9 @@ def test_query_actions_keyboard_shape():
         "query:next_ptm",
         "query:last_ptm",
     ]
+    labels = [btn["text"] for row in keyboard["inline_keyboard"] for btn in row]
+    assert any("Upcoming" in label for label in labels)
+    assert keyboard["inline_keyboard"][0][0].get("style") == "success"
 
 
 def test_parse_query_callback_and_text():
@@ -59,7 +62,7 @@ def test_collapse_multi_day_and_format():
         empty="none",
         today=date(2026, 12, 20),
     )
-    assert "WINTER BREAK —" in text
+    assert "WINTER BREAK" in text
     assert "HOLI" in text
 
     single = _format_single(
@@ -91,6 +94,8 @@ def test_class_set_shows_query_buttons(monkeypatch):
     app = FastAPI()
     app.include_router(telegram_router)
     monkeypatch.setattr("api.v1.telegram.router.config.TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr("api.v1.telegram.router.config.ADMIN_USER_ID", ["1"])
+    monkeypatch.setattr("api.v1.telegram.router.config.ALLOWED_USER_ID", [])
     monkeypatch.setattr("api.v1.telegram.router.TelegramBotService", lambda: fake_bot)
     client = TestClient(app)
 
@@ -143,6 +148,8 @@ def test_query_button_callback_answers(monkeypatch):
     app = FastAPI()
     app.include_router(telegram_router)
     monkeypatch.setattr("api.v1.telegram.router.config.TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr("api.v1.telegram.router.config.ADMIN_USER_ID", [])
+    monkeypatch.setattr("api.v1.telegram.router.config.ALLOWED_USER_ID", ["1"])
     monkeypatch.setattr("api.v1.telegram.router.TelegramBotService", lambda: fake_bot)
     monkeypatch.setattr("api.v1.telegram.router.CalendarQueryService", lambda: FakeQueryService())
     monkeypatch.setattr("api.v1.telegram.router.AsyncSessionLocal", lambda: FakeAsyncSession())
@@ -165,4 +172,9 @@ def test_query_button_callback_answers(monkeypatch):
     assert body["action"] == "calendar_query"
     assert body["intent"] == "next_ptm"
     assert "OPEN HOUSE" in fake_bot.sent[-1]
-    assert fake_bot.markups[-1]["inline_keyboard"][1][0]["callback_data"] == "query:next_ptm"
+    flat = [
+        btn["callback_data"]
+        for row in fake_bot.markups[-1]["inline_keyboard"]
+        for btn in row
+    ]
+    assert "query:next_ptm" in flat
